@@ -58,27 +58,50 @@ end
 
 """
     image_grid(samples::AbstractMatrix{<:Real}, ncols::Int = 10;
-        rows::Int = 28, cols::Int = 28, title::String = "") -> Plots.Plot
+        rows::Int = 28, cols::Int = 28, title::String = "",
+        tile_titles::Union{Nothing, AbstractVector{<:AbstractString}} = nothing,
+        tile_px::Int = 110) -> Plots.Plot
 
 Lay out the columns of `samples` (each a flattened image of length
-`rows * cols`) into a single grid figure with `ncols` columns. Used for
-all sample-grid visualizations in the notebook.
+`rows * cols`) into a single grid figure with `ncols` columns. Matches the
+L10d-lab face-grid aesthetic: each tile is a `Gray.(...)` heatmap with
+`aspect_ratio = :equal`, axes / ticks / colorbar off, and a small per-tile
+title if `tile_titles` is supplied. An optional outer `title` runs across
+the top of the whole grid.
 """
 function image_grid(samples::AbstractMatrix{<:Real}, ncols::Int = 10;
-    rows::Int = 28, cols::Int = 28, title::String = "")
+    rows::Int = 28, cols::Int = 28, title::String = "",
+    tile_titles::Union{Nothing, AbstractVector{<:AbstractString}} = nothing,
+    tile_px::Int = 110)
+
     n = size(samples, 2)
     nrows = cld(n, ncols)
     plots = Vector{Any}(undef, nrows * ncols)
     for k in 1:(nrows * ncols)
         if k <= n
-            img = clamp.(reshape(samples[:, k], rows, cols), 0.0, 1.0)
+            mat = clamp.(reshape(samples[:, k], rows, cols), 0.0, 1.0)
+            img = Gray.(mat)
+            t = (tile_titles === nothing || k > length(tile_titles)) ? "" : tile_titles[k]
             plots[k] = heatmap(img;
                 color = :grays, axis = false, ticks = false, colorbar = false,
-                yflip = true, aspect_ratio = :equal)
+                aspect_ratio = :equal,
+                title = t, titlefontsize = 7)
         else
             plots[k] = plot(framestyle = :none)
         end
     end
-    return plot(plots...; layout = (nrows, ncols), size = (60 * ncols, 60 * nrows),
-        plot_title = title)
+
+    has_title = !isempty(title)
+    has_tile_titles = tile_titles !== nothing
+    # Reserve more vertical room when an outer title and per-tile titles coexist,
+    # so the outer title doesn't overprint the per-tile titles.
+    title_px = has_title ? (has_tile_titles ? 70 : 40) : 0
+    top_mm  = has_title ? (has_tile_titles ? 8 : 4) : 0
+    return plot(plots...;
+        layout = (nrows, ncols),
+        size = (tile_px * ncols, tile_px * nrows + title_px),
+        margin = 0Plots.PlotMeasures.mm,
+        top_margin = top_mm * Plots.PlotMeasures.mm,
+        plot_title = title,
+        plot_titlefontsize = 12)
 end

@@ -112,6 +112,36 @@ function modern_hopfield_recall(model::MyModernHopfieldNetworkModel,
 end
 
 """
+    sa_initial_states(model::MyStochasticAttentionModel, n_samples::Int;
+        rng::AbstractRNG = Random.GLOBAL_RNG,
+        hard_mask::Union{Nothing, AbstractVector{Bool}} = nothing) -> Matrix{Float64}
+
+Build the warm-start matrix `S₀` that `stochastic_attention_sample` would use
+internally if no `sₒ` is supplied: each column is a randomly chosen *visible*
+stored pattern plus a small Gaussian kick. Exposing this so the notebook can
+display *both* the starting image of a chain and the final sample side by
+side, rather than just the final.
+
+If `hard_mask` is supplied, the warm starts are drawn only from the columns
+where `hard_mask[j] == true`.
+"""
+function sa_initial_states(model::MyStochasticAttentionModel, n_samples::Int;
+    rng::AbstractRNG = Random.GLOBAL_RNG,
+    hard_mask::Union{Nothing, AbstractVector{Bool}} = nothing)::Matrix{Float64}
+
+    X = model.X
+    d, N = size(X)
+    allowed = hard_mask === nothing ? collect(1:N) : findall(hard_mask)
+    @assert !isempty(allowed) "hard_mask excludes every stored pattern; nothing to sample from"
+    S0 = zeros(Float64, d, n_samples)
+    for k in 1:n_samples
+        j = rand(rng, allowed)
+        S0[:, k] = X[:, j] .+ 0.05 .* randn(rng, d)
+    end
+    return S0
+end
+
+"""
     stochastic_attention_sample(model::MyStochasticAttentionModel, n_samples::Int;
         n_steps::Int = 200,
         sₒ::Union{Nothing, Matrix{Float64}} = nothing,
@@ -185,14 +215,7 @@ function stochastic_attention_sample(model::MyStochasticAttentionModel,
     # patterns (after applying the hard mask, if any) plus a small Gaussian
     # kick. Starting on the data manifold avoids a long burn-in.
     S = if sₒ === nothing
-        S0 = zeros(Float64, d, n_samples)
-        allowed = hard_mask === nothing ? collect(1:N) : findall(hard_mask)
-        @assert !isempty(allowed) "hard_mask excludes every stored pattern; nothing to sample from"
-        for k in 1:n_samples
-            j = rand(rng, allowed)
-            S0[:, k] = X[:, j] .+ 0.05 .* randn(rng, d)
-        end
-        S0
+        sa_initial_states(model, n_samples; rng = rng, hard_mask = hard_mask)
     else
         @assert size(sₒ) == (d, n_samples) "sₒ must have shape (d, n_samples)"
         copy(sₒ)
@@ -205,6 +228,18 @@ function stochastic_attention_sample(model::MyStochasticAttentionModel,
         # (1 − η) s + η · X p is the η-blended modern-Hopfield update; the
         # noise term is what turns a deterministic recall into a sampler.
         S[:, k] = (1 - η) .* s .+ η .* (X * p) .+ σ .* randn(rng, d)
+    end
+
+    # Final noise-free read-out: one modern-Hopfield update with no noise
+    # projects each chain back onto the data manifold (a convex combination
+    # of stored patterns) so the sample is visually clean. This is the
+    # standard MAP / denoising step used at the end of score-based and
+    # Langevin samplers; the noisy chain above is what defines the
+    # distribution we're sampling from, this is just how we read it out.
+    for k in 1:n_samples
+        s = view(S, :, k)
+        p = _attention_weights(X, s, β; logit_bias = logit_bias)
+        S[:, k] = X * p
     end
     return S
 end
