@@ -121,7 +121,9 @@ the top of the whole grid.
 function image_grid(samples::AbstractMatrix{<:Real}, ncols::Int = 10;
     rows::Int = 64, cols::Int = 64, title::String = "",
     tile_titles::Union{Nothing, AbstractVector{<:AbstractString}} = nothing,
-    tile_px::Int = 110)
+    tile_px::Int = 110,
+    outer_title_fontsize::Int = 10,
+    tile_title_fontsize::Int = 8)
 
     n = size(samples, 2)
     nrows = cld(n, ncols)
@@ -134,7 +136,7 @@ function image_grid(samples::AbstractMatrix{<:Real}, ncols::Int = 10;
             plots[k] = heatmap(img;
                 color = :grays, axis = false, ticks = false, colorbar = false,
                 aspect_ratio = :equal,
-                title = t, titlefontsize = 7)
+                title = t, titlefontsize = tile_title_fontsize)
         else
             plots[k] = plot(framestyle = :none)
         end
@@ -142,15 +144,15 @@ function image_grid(samples::AbstractMatrix{<:Real}, ncols::Int = 10;
 
     has_title = !isempty(title)
     has_tile_titles = tile_titles !== nothing
-    # Reserve more vertical room when an outer title and per-tile titles coexist,
-    # so the outer title doesn't overprint the per-tile titles.
-    title_px = has_title ? (has_tile_titles ? 70 : 40) : 0
-    top_mm  = has_title ? (has_tile_titles ? 8 : 4) : 0
+    title_px = has_title ? (has_tile_titles ? 80 : 50) : 0
+    top_mm  = has_title ? (has_tile_titles ? 10 : 6) : 0
     return plot(plots...;
         layout = (nrows, ncols),
         size = (tile_px * ncols, tile_px * nrows + title_px),
-        margin = 0Plots.PlotMeasures.mm,
-        top_margin = top_mm * Plots.PlotMeasures.mm,
+        top_margin    = top_mm * Plots.PlotMeasures.mm,
+        bottom_margin = 2Plots.PlotMeasures.mm,
+        left_margin   = 2Plots.PlotMeasures.mm,
+        right_margin  = 2Plots.PlotMeasures.mm,
         plot_title = title,
-        plot_titlefontsize = 12)
+        plot_titlefontsize = outer_title_fontsize)
 end
