@@ -186,7 +186,8 @@ function stochastic_attention_sample(model::MyStochasticAttentionModel,
     sₒ::Union{Nothing, Matrix{Float64}} = nothing,
     rng::AbstractRNG = Random.GLOBAL_RNG,
     hard_mask::Union{Nothing, AbstractVector{Bool}} = nothing,
-    soft_bias::Union{Nothing, AbstractVector{<:Real}} = nothing)::Matrix{Float64}
+    soft_bias::Union{Nothing, AbstractVector{<:Real}} = nothing,
+    denoise::Bool = true)::Matrix{Float64}
 
     X = model.X
     d, N = size(X)
@@ -230,16 +231,22 @@ function stochastic_attention_sample(model::MyStochasticAttentionModel,
         S[:, k] = (1 - η) .* s .+ η .* (X * p) .+ σ .* randn(rng, d)
     end
 
-    # Final noise-free read-out: one modern-Hopfield update with no noise
-    # projects each chain back onto the data manifold (a convex combination
-    # of stored patterns) so the sample is visually clean. This is the
-    # standard MAP / denoising step used at the end of score-based and
-    # Langevin samplers; the noisy chain above is what defines the
-    # distribution we're sampling from, this is just how we read it out.
-    for k in 1:n_samples
-        s = view(S, :, k)
-        p = _attention_weights(X, s, β; logit_bias = logit_bias)
-        S[:, k] = X * p
+    # Optional final noise-free read-out: one modern-Hopfield update with no
+    # noise projects each chain onto the convex hull of stored patterns. This
+    # is the standard MAP / denoising step used at the end of score-based and
+    # Langevin samplers — at moderate β it produces a clean blend; at very
+    # large β (or in very high dimension where inner-product magnitudes are
+    # huge), the softmax is essentially one-hot and X·softmax(...) collapses
+    # back onto a single stored column. For *masked* sampling that collapse
+    # is what we want (the mask makes the chosen column an in-class one);
+    # for *unconditional* sampling on high-dim data it kills novelty, so the
+    # caller can opt out by passing `denoise = false`.
+    if denoise
+        for k in 1:n_samples
+            s = view(S, :, k)
+            p = _attention_weights(X, s, β; logit_bias = logit_bias)
+            S[:, k] = X * p
+        end
     end
     return S
 end
