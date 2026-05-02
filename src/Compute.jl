@@ -11,11 +11,14 @@ The single `logit_bias` knob covers the two conditioning regimes used in
 this practicum:
 - **Hard mask** (Task 3a): `logit_bias[j] = 0.0` for in-class memories,
   `-Inf` for out-of-class memories. The exponential then exactly zeros the
-  out-of-class weights — same trick GPT uses for causal masking.
-- **Soft bias** (Task 3b, Varner 2026, arXiv:2603.20115): `logit_bias[j] = b`
-  for in-class memories with `b` finite, `0.0` for out-of-class memories.
-  The relative attention weight on the in-class subset is steered by `b`
-  but no pattern is hard-excluded.
+  out-of-class weights, same trick GPT uses for causal masking.
+- **Log-multiplicity bias** (Task 3b, Varner 2026, arXiv:2603.20115, Eq. 3):
+  `logit_bias[j] = log(rⱼ)` where `rⱼ > 0` is a per-pattern multiplicity
+  weight. For a binary in-class/out-of-class split parameterized by a single
+  multiplicity ratio `ρ ≥ 1`, set `rⱼ = ρ` for in-class and `rⱼ = 1` for
+  out-of-class, so `logit_bias[j] = log(ρ)` in-class, `0.0` out-of-class.
+  At `ρ = 1` the sampler is unconditional; as `ρ → ∞` it approaches the
+  hard mask.
 
 `logit_bias = nothing` recovers the unconditional sampler.
 """
@@ -42,15 +45,23 @@ function _hard_mask_bias(mask::AbstractVector{Bool})::Vector{Float64}
 end
 
 """
-    _soft_bias_vector(in_subset::AbstractVector{Bool}, bias::Real) -> Vector{Float64}
+    _log_multiplicity_bias(in_subset::AbstractVector{Bool}, ρ::Real) -> Vector{Float64}
 
-Convert an in-subset indicator into a `logit_bias` vector that adds `bias`
-to in-subset logits and `0.0` to out-of-subset logits. Combined with a
-non-`-Inf` softmax, this is the multiplicity-ratio conditioning of
-Varner (2026, arXiv:2603.20115).
+Convert an in-subset indicator and a multiplicity ratio `ρ ≥ 1` into the
+`logit_bias` vector of Varner (2026, arXiv:2603.20115), Eq. 3:
+
+    logit_bias[j] = log(ρ)  if in_subset[j],   0.0 otherwise.
+
+This is the binary parameterization (`r_designated = ρ`, `r_background = 1`)
+of the multiplicity-weighted Hopfield energy. At `ρ = 1` the bias vanishes
+(no preference); as `ρ → ∞` the in-subset softmax mass dominates and the
+sampler approaches the hard-mask limit. Pass the result as the `soft_bias`
+keyword to `stochastic_attention_sample`.
 """
-function _soft_bias_vector(in_subset::AbstractVector{Bool}, bias::Real)::Vector{Float64}
-    return [m ? Float64(bias) : 0.0 for m in in_subset]
+function _log_multiplicity_bias(in_subset::AbstractVector{Bool}, ρ::Real)::Vector{Float64}
+    @assert ρ > 0 "multiplicity ratio ρ must be positive"
+    lρ = log(Float64(ρ))
+    return [m ? lρ : 0.0 for m in in_subset]
 end
 # --- PRIVATE METHODS ABOVE HERE -------------------------------------------------------------------------------------- #
 
@@ -165,9 +176,11 @@ training-free generative sampler of Varner (2026, arXiv:2603.14717).
   with `hard_mask[j] == false` by setting its softmax logit to `-Inf`.
   This is the GPT-style causal-mask trick applied to a Hopfield memory.
 - `soft_bias::Vector{<:Real}` of length `size(X, 2)` adds an entry-wise
-  scalar bias to each memory's softmax logit. Combine with a per-class
-  indicator (`bias_value` for in-class, `0.0` for out-of-class) to recover
-  the multiplicity-ratio conditioning of Varner (2026, arXiv:2603.20115).
+  scalar bias to each memory's softmax logit. Per Varner (2026,
+  arXiv:2603.20115), Eq. 3, the principled choice is the elementwise
+  log-multiplicity `soft_bias[j] = log(rⱼ)`. For a binary in-class /
+  out-of-class split with multiplicity ratio `ρ ≥ 1`, use `log(ρ)` in-class
+  and `0.0` out-of-class (see `_log_multiplicity_bias`).
 - The two forms compose: `hard_mask` and `soft_bias` are summed before the
   softmax. Pass only one or the other in this practicum.
 
